@@ -3,15 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STUDIO ALMA - EXACT TIME</title>
+    <title>STUDIO ALMA - DUAL TAB SYSTEM</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; line-height: 1.1; }
         html, body { height: 100%; width: 100%; overflow: hidden; background-color: #000; color: white; font-family: Arial, sans-serif; }
         body { display: flex; flex-direction: column; padding: 2px; }
-        .header { height: 45px; background: #111; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 3px solid #ff6600; margin-bottom: 5px; flex-shrink: 0; }
+        .header { height: 55px; background: #111; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 3px solid #ff6600; margin-bottom: 5px; flex-shrink: 0; }
         .logo-main { font-size: 26px; color: #ff6600; font-weight: 900; }
         #time { font-size: 24px; color: #00ffcc; font-weight: 900; }
+        .header-center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         #training-info { font-size: 16px; color: #ff6600; font-weight: bold; }
+        
+        #workout-timer { font-size: 28px; color: #ff0055; font-weight: 900; background: rgba(255, 0, 85, 0.1); padding: 2px 12px; border-radius: 6px; border: 1px solid #ff0055; margin-top: 2px; font-family: monospace; }
+        #workout-timer.running { color: #00ffcc; border-color: #00ffcc; background: rgba(0, 255, 204, 0.1); animation: blink 1s infinite alternate; }
+        #workout-timer.halfway { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 103, 0.1); }
+        
         #container { flex-grow: 1; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
         .row { display: flex; flex: 1; gap: 4px; justify-content: center; align-items: stretch; max-height: 48%; }
         .card { background: #111; border: 1.5px solid #333; border-radius: 10px; display: flex; flex-direction: column; flex: 1; padding: 6px; overflow: hidden; }
@@ -27,30 +33,160 @@
         }
         .weight { color: #ff9f43; font-weight: 900; margin-right: 6px; font-size: 13px; background: rgba(255,159,67,0.1); padding: 0 3px; border-radius: 3px; }
         .footer-credit { height: 18px; font-size: 11px; color: #444; text-align: left; padding: 0 10px; font-family: Arial; }
+        
+        @keyframes blink { from { opacity: 1; } to { opacity: 0.85; } }
     </style>
 </head>
 <body>
     <div class="header">
-        <div id="training-info">מעדכן...</div>
-        <div class="logo-main">STUDIO ALMA</div>
         <div id="time">00:00:00</div>
+        <div class="header-center">
+            <div id="training-info">טוען...</div>
+            <div id="workout-timer">--:--</div>
+        </div>
+        <div class="logo-main">STUDIO ALMA</div>
     </div>
     <div id="container"></div>
     <div class="footer-credit">Developed by Gal E</div>
 
     <script>
+        // --- הגדרות הגיליונות המעודכנות ---
         const SHEET_ID = '1IwRekT67DtOfhCy3iN9ogGXNWd2DZWT5rhbsmkz_1NY';
-        const URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+        const MAIN_TAB_GID = '0';                 // הגיליון הראשי עם המתאמנות
+        const TIMER_TAB_GID = '573894189';         // הגיליון החדש של הטיימר
+        // ------------------------------------
+
+        const MAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${MAIN_TAB_GID}`;
+        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${TIMER_TAB_GID}`;
+
+        let timerSeconds = 0;
+        let initialDuration = 0;
+        let timerStatus = "STOP"; 
+        let timerInterval = null;
+        let spokenHalfway = false;
+        let lastSpokenSecond = -1;
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US';
+                utterance.rate = 1.15;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
 
         async function loadData() {
             try {
-                const response = await fetch(URL + '&t=' + Date.now());
-                const text = await response.text();
-                const rows = text.split('\n').map(line => 
+                const timestamp = '&t=' + Date.now();
+                
+                // 1. משיכת נתוני הטיימר מטאב הטיימר
+                const resTimer = await fetch(TIMER_URL + timestamp);
+                const textTimer = await resTimer.text();
+                const rowsTimer = textTimer.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
+                parseTimerSettings(rowsTimer);
+
+                // 2. משיכת נתוני המתאמנות מהטאב הראשי
+                const resMain = await fetch(MAIN_URL + timestamp);
+                const textMain = await resMain.text();
+                const rowsMain = textMain.split('\n').map(line => 
                     line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim())
                 );
-                parse(rows);
-            } catch (e) { console.error(e); }
+                parse(rowsMain);
+
+            } catch (e) { console.error("Error loading data: ", e); }
+        }
+
+        function parseTimerSettings(rows) {
+            let targetDurationInSeconds = 0;
+            let targetStatus = "STOP";
+
+            for (let i = 0; i < rows.length; i++) {
+                for (let j = 0; j < rows[i].length; j++) {
+                    let cell = rows[i][j] ? rows[i][j].trim() : "";
+                    
+                    if (cell === "זמן טיימר בדקות") {
+                        let val = parseFloat(rows[i][j+1]); // תמיכה בדקות עשרוניות (למשל 1.5)
+                        if (!isNaN(val)) targetDurationInSeconds = Math.round(val * 60);
+                    }
+                    if (cell === "סטטוס טיימר") {
+                        let val = rows[i][j+1] ? rows[i][j+1].toUpperCase().trim() : "STOP";
+                        if (val === "START" || val === "STOP" || val === "RESET") targetStatus = val;
+                    }
+                }
+            }
+
+            if (targetStatus === "RESET") {
+                clearInterval(timerInterval);
+                timerInterval = null;
+                timerStatus = "STOP";
+                timerSeconds = targetDurationInSeconds;
+                initialDuration = targetDurationInSeconds;
+                spokenHalfway = false;
+                lastSpokenSecond = -1;
+                updateTimerDisplay();
+            } else if (targetStatus === "START" && timerStatus !== "START") {
+                timerStatus = "START";
+                timerSeconds = targetDurationInSeconds;
+                initialDuration = targetDurationInSeconds;
+                spokenHalfway = false;
+                lastSpokenSecond = -1;
+                startLocalTimer();
+            } else if (targetStatus === "STOP" && timerStatus === "START") {
+                clearInterval(timerInterval);
+                timerInterval = null;
+                timerStatus = "STOP";
+                updateTimerDisplay();
+            } else if (timerStatus === "STOP" && targetStatus === "START") {
+                timerSeconds = targetDurationInSeconds;
+            }
+        }
+
+        function startLocalTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            updateTimerDisplay();
+            
+            timerInterval = setInterval(() => {
+                if (timerSeconds <= 0) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                    timerStatus = "STOP";
+                    speak("Time is up");
+                    updateTimerDisplay();
+                    return;
+                }
+
+                timerSeconds--;
+                updateTimerDisplay();
+
+                let halfTime = Math.floor(initialDuration / 2);
+                if (timerSeconds === halfTime && !spokenHalfway && initialDuration > 10) {
+                    speak("Half way");
+                    spokenHalfway = true;
+                }
+
+                if (timerSeconds <= 5 && timerSeconds > 0 && lastSpokenSecond !== timerSeconds) {
+                    speak(timerSeconds.toString());
+                    lastSpokenSecond = timerSeconds;
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById('workout-timer');
+            let mins = Math.floor(timerSeconds / 60);
+            let secs = timerSeconds % 60;
+            timerEl.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+            if (timerStatus === "START") {
+                timerEl.className = "running";
+                let halfTime = Math.floor(initialDuration / 2);
+                if (timerSeconds <= halfTime) {
+                    timerEl.classList.add("halfway");
+                }
+            } else {
+                timerEl.className = "";
+            }
         }
 
         function parse(rows) {
@@ -71,28 +207,16 @@
             });
             if (current) sessions.push(current);
 
-            // לוגיקת החלפה מדויקת:
-            // 1. מחפשים אם יש אימון שמתחיל ממש עכשיו (בטווח של 60 הדקות הקרובות)
-            // 2. אם לא, מציגים את האימון האחרון שהתחיל ב-60 הדקות האחרונות
             let active = null;
-            
             for (let i = 0; i < sessions.length; i++) {
                 let s = sessions[i];
                 let nextS = sessions[i+1];
-                
-                // אם השעה הנוכחית היא בין תחילת האימון הזה לתחילת האימון הבא
                 if (nowMin >= s.start && (!nextS || nowMin < nextS.start)) {
-                    // מציג אותו רק אם לא עברו יותר מ-65 דקות מתחילתו (כדי שלא יתקע בלילה)
-                    if (nowMin < s.start + 65) {
-                        active = s;
-                    }
-                }
-                // אם האימון עומד להתחיל ב-10 דקות הקרובות
-                else if (nowMin >= s.start - 10 && nowMin < s.start) {
+                    if (nowMin < s.start + 65) active = s;
+                } else if (nowMin >= s.start - 10 && nowMin < s.start) {
                     active = s;
                 }
             }
-
             render(active);
         }
 
@@ -151,7 +275,8 @@
             container.appendChild(rowDiv);
         }
 
-        setInterval(loadData, 15000);
+        // קצב רענון מהיר לעדכון פקודות מיידי מהטלפון של המאמנת
+        setInterval(loadData, 2500);
         setInterval(() => {
             const d = new Date();
             document.getElementById('time').innerText = d.toTimeString().split(' ')[0];
