@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STUDIO ALMA - EXACT TIME & TIMER</title>
+    <title>STUDIO ALMA - FIXED SYSTEM</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; line-height: 1.1; }
         html, body { height: 100%; width: 100%; overflow: hidden; background-color: #000; color: white; font-family: Arial, sans-serif; }
@@ -14,7 +14,6 @@
         .header-center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         #training-info { font-size: 16px; color: #ff6600; font-weight: bold; }
         
-        /* עיצוב ויזואלי של הטיימר */
         #workout-timer { font-size: 28px; color: #ff0055; font-weight: 900; background: rgba(255, 0, 85, 0.1); padding: 2px 12px; border-radius: 6px; border: 1px solid #ff0055; margin-top: 2px; font-family: monospace; }
         #workout-timer.running { color: #00ffcc; border-color: #00ffcc; background: rgba(0, 255, 204, 0.1); animation: blink 1s infinite alternate; }
         #workout-timer.halfway { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 103, 0.1); }
@@ -51,10 +50,9 @@
     <div class="footer-credit">Developed by Gal E</div>
 
     <script>
-        // --- קישורי ה-Publish המעודכנים בפורמט CSV לטאבים השונים ---
+        // קישורי ה-Publish הרשמיים שלך
         const MAIN_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTggXVWik8QaoDDmwiG2f8j10AChK6CorKyVSzciYilwcGdOIEg1cvK19ncB65S3RZpCIvJwORgxXna/pub?gid=0&single=true&output=csv`;
         const TIMER_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTggXVWik8QaoDDmwiG2f8j10AChK6CorKyVSzciYilwcGdOIEg1cvK19ncB65S3RZpCIvJwORgxXna/pub?gid=573894189&single=true&output=csv`;
-        // -------------------------------------------------------------
 
         let timerSeconds = 0;
         let initialDuration = 0;
@@ -63,37 +61,62 @@
         let spokenHalfway = false;
         let lastSpokenSecond = -1;
 
-        // פונקציית מנוע הדיבור של הדפדפן
         function speak(text) {
             if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); // עצירת דיבור קודם כדי למנוע כפילויות בדיליי
+                window.speechSynthesis.cancel();
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'en-US';
-                utterance.rate = 1.15; // הגברה קלה של הקצב לספירה מדויקת
+                utterance.rate = 1.15;
                 window.speechSynthesis.speak(utterance);
             }
         }
 
-        // טעינת הנתונים במקביל משני הגיליונות
+        // פונקציית עזר חסינה לפירוק שורות CSV המונעת קריסות קוד
+        function parseCSV(text) {
+            let lines = text.split(/\r?\n/);
+            return lines.map(line => {
+                let cells = [];
+                let current = '';
+                let inQuotes = false;
+                for (let i = 0; i < line.length; i++) {
+                    let char = line[i];
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        cells.push(current.trim());
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                cells.push(current.trim());
+                return cells;
+            });
+        }
+
         async function loadData() {
             try {
                 const timestamp = '&t=' + Date.now();
                 
-                // 1. קריאת נתוני הטיימר מטאב הטיימר (gid=573894189)
+                // 1. טעינת טיימר
                 const resTimer = await fetch(TIMER_URL + timestamp);
                 const textTimer = await resTimer.text();
-                const rowsTimer = textTimer.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
-                parseTimerSettings(rowsTimer);
+                if (textTimer && textTimer.length > 0) {
+                    const rowsTimer = parseCSV(textTimer);
+                    parseTimerSettings(rowsTimer);
+                }
 
-                // 2. קריאת נתוני האימון מהטאב הראשי (gid=0)
+                // 2. טעינת מתאמנות
                 const resMain = await fetch(MAIN_URL + timestamp);
                 const textMain = await resMain.text();
-                const rowsMain = textMain.split('\n').map(line => 
-                    line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim())
-                );
-                parse(rowsMain);
+                if (textMain && textMain.length > 0) {
+                    const rowsMain = parseCSV(textMain);
+                    parse(rowsMain);
+                }
 
-            } catch (e) { console.error("Error loading data: ", e); }
+            } catch (e) { 
+                console.error("Error loading data: ", e); 
+            }
         }
 
         function parseTimerSettings(rows) {
@@ -102,16 +125,16 @@
 
             for (let i = 0; i < rows.length; i++) {
                 for (let j = 0; j < rows[i].length; j++) {
-                    let cell = rows[i][j] ? rows[i][j].trim() : "";
+                    let cell = rows[i][j] ? rows[i][j].replace(/^"|"$/g, '').trim() : "";
                     
                     if (cell === "זמן טיימר בדקות") {
-                        let nextCell = rows[i][j+1] ? rows[i][j+1].trim() : "";
-                        let val = parseFloat(nextCell); // תמיכה בדקות עשרוניות (למשל 1.5)
+                        let nextCell = rows[i][j+1] ? rows[i][j+1].replace(/^"|"$/g, '').trim() : "";
+                        let val = parseFloat(nextCell);
                         if (!isNaN(val)) targetDurationInSeconds = Math.round(val * 60);
                     }
                     if (cell === "סטטוס טיימר") {
-                        let nextCell = rows[i][j+1] ? rows[i][j+1].trim() : "STOP";
-                        let val = nextCell.toUpperCase(); // חסינות מפני אותיות קטנות (start -> START)
+                        let nextCell = rows[i][j+1] ? rows[i][j+1].replace(/^"|"$/g, '').trim() : "STOP";
+                        let val = nextCell.toUpperCase();
                         if (val === "START" || val === "STOP" || val === "RESET") targetStatus = val;
                     }
                 }
@@ -159,3 +182,72 @@
 
                 timerSeconds--;
                 updateTimerDisplay();
+
+                let halfTime = Math.floor(initialDuration / 2);
+                if (timerSeconds === halfTime && !spokenHalfway && initialDuration > 10) {
+                    speak("Half way");
+                    spokenHalfway = true;
+                }
+
+                if (timerSeconds <= 5 && timerSeconds > 0 && lastSpokenSecond !== timerSeconds) {
+                    speak(timerSeconds.toString());
+                    lastSpokenSecond = timerSeconds;
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById('workout-timer');
+            let mins = Math.floor(timerSeconds / 60);
+            let secs = timerSeconds % 60;
+            timerEl.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+            if (timerStatus === "START") {
+                timerEl.className = "running";
+                let halfTime = Math.floor(initialDuration / 2);
+                if (timerSeconds <= halfTime) {
+                    timerEl.classList.add("halfway");
+                }
+            } else {
+                timerEl.className = "";
+            }
+        }
+
+        function parse(rows) {
+            const now = new Date();
+            const nowMin = (now.getHours() * 60) + now.getMinutes();
+            let sessions = [], current = null;
+
+            rows.forEach(row => {
+                if (!row || row.length === 0) return;
+                let firstCell = row[0] ? row[0].replace(/^"|"$/g, '').trim() : "";
+                
+                if (firstCell.includes("אימון")) {
+                    const m = firstCell.match(/(\d{1,2}):(\d{2})/);
+                    if (m) {
+                        if (current) sessions.push(current);
+                        current = { start: (parseInt(m[1])*60)+parseInt(m[2]), title: firstCell, trainees: [] };
+                    }
+                } else if (current && firstCell !== "מתאמנת" && firstCell !== "") {
+                    if (firstCell !== "זמן טיימר בדקות" && firstCell !== "סטטוס טיימר") {
+                        current.trainees.push(row);
+                    }
+                }
+            });
+            if (current) sessions.push(current);
+
+            let active = null;
+            for (let i = 0; i < sessions.length; i++) {
+                let s = sessions[i];
+                let nextS = sessions[i+1];
+                if (nowMin >= s.start && (!nextS || nowMin < nextS.start)) {
+                    if (nowMin < s.start + 65) active = s;
+                } else if (nowMin >= s.start - 10 && nowMin < s.start) {
+                    active = s;
+                }
+            }
+            render(active);
+        }
+
+        function render(active) {
+            const container =
