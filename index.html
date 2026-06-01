@@ -11,10 +11,12 @@
         .header { height: 55px; background: #111; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; border-bottom: 3px solid #ff6600; margin-bottom: 5px; flex-shrink: 0; }
         .logo-main { font-size: 26px; color: #ff6600; font-weight: 900; }
         #time { font-size: 24px; color: #00ffcc; font-weight: 900; }
-        .header-center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        #training-info { font-size: 16px; color: #ff6600; font-weight: bold; }
         
-        #workout-timer { font-size: 28px; color: #ff0055; font-weight: 900; background: rgba(255, 0, 85, 0.1); padding: 2px 12px; border-radius: 6px; border: 1px solid #ff0055; margin-top: 2px; font-family: monospace; }
+        .header-center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        /* עיצוב חדש ובולט לסבבים במקום שם האימון */
+        #round-counter { font-size: 18px; color: #ff6600; font-weight: bold; margin-bottom: 2px; text-transform: uppercase; }
+        
+        #workout-timer { font-size: 28px; color: #ff0055; font-weight: 900; background: rgba(255, 0, 85, 0.1); padding: 2px 12px; border-radius: 6px; border: 1px solid #ff0055; font-family: monospace; }
         #workout-timer.running { color: #00ffcc; border-color: #00ffcc; background: rgba(0, 255, 204, 0.1); animation: blink 1s infinite alternate; }
         #workout-timer.halfway { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 103, 0.1); }
         #workout-timer.break { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 67, 0.15); animation: blink 1.5s infinite alternate; }
@@ -42,7 +44,7 @@
     <div class="header">
         <div id="time">00:00:00</div>
         <div class="header-center">
-            <div id="training-info">טוען נתונים...</div>
+            <div id="round-counter">סבב 1 מתוך 6</div>
             <div id="workout-timer">--:--</div>
         </div>
         <div class="logo-main">STUDIO ALMA</div>
@@ -53,7 +55,6 @@
     <script>
         const SHEET_ID = '1IwRekT67DtOfhCy3iN9ogGXNWd2DZWT5rhbsmkz_1NY';
         const MAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
-        // פנייה ישירה לטאב נתוני טיימר הנקי (ללא כפתורים גרפיים) כדי למנוע שגיאות ייצוא של גוגל
         const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=1478781763`;
 
         let timerSeconds = 0;
@@ -68,8 +69,11 @@
         let spokenHalfway = false;
         let lastSpokenSecond = -1;
         
-        // מעקב אחרי הסטטוס האחרון שנקרא מהגיליון
         let lastSheetStatus = "STOP";
+
+        // מקובע ל-6 תרגילים קבוע באימון לפי הבקשה שלך
+        const TOTAL_ROUNDS = 6; 
+        let currentRound = 1;
 
         function speak(text) {
             if ('speechSynthesis' in window) {
@@ -107,7 +111,7 @@
             try {
                 const timestamp = '&t=' + Date.now();
                 
-                // 1. משיכת נתוני הטיימר מהטאב הנקי החדש
+                // 1. משיכת נתוני הטיימר
                 const resTimer = await fetch(TIMER_URL + timestamp);
                 const textTimer = await resTimer.text();
                 if (textTimer && textTimer.trim().length > 0) {
@@ -115,7 +119,7 @@
                     parseTimerSettings(rowsTimer);
                 }
 
-                // 2. משיכת נתוני המתאמנות מהטאב הראשי
+                // 2. משיכת נתוני המתאמנות
                 const resMain = await fetch(MAIN_URL + timestamp);
                 const textMain = await resMain.text();
                 if (textMain && textMain.trim().length > 0) {
@@ -147,19 +151,22 @@
                 }
             }
 
-            // עדכון וסנכרון זמני ברירת המחדל כשהטיימר במצב עצור
-            if (timerStatus === "STOP" && currentPhase === "WORK" && timerSeconds !== targetWorkSeconds) {
-                timerSeconds = targetWorkSeconds;
-                updateTimerDisplay();
+            // עדכון ראשוני או אחרי RESET בלבד
+            if (timerStatus === "STOP" && lastSheetStatus !== "STOP" && sheetStatus !== "START" && sheetStatus !== "STOP") {
+                if (timerSeconds !== targetWorkSeconds) {
+                    timerSeconds = targetWorkSeconds;
+                    updateTimerDisplay();
+                }
             }
 
-            // הפעלת לוגיקה רק במידה והתגלה שינוי במצב בגיליון
+            // זיהוי שינויים מהלחצנים בגוגל שיט
             if (sheetStatus !== lastSheetStatus) {
                 if (sheetStatus === "RESET") {
                     clearInterval(timerInterval);
                     timerInterval = null;
                     timerStatus = "STOP";
                     currentPhase = "WORK";
+                    currentRound = 1;
                     timerSeconds = targetWorkSeconds;
                     initialDuration = targetWorkSeconds;
                     spokenHalfway = false;
@@ -167,10 +174,12 @@
                     updateTimerDisplay();
                 } else if (sheetStatus === "START" && timerStatus !== "START") {
                     timerStatus = "START";
-                    currentPhase = "WORK";
-                    timerSeconds = targetWorkSeconds;
-                    initialDuration = targetWorkSeconds;
-                    spokenHalfway = false;
+                    if (timerSeconds <= 0 || timerSeconds === targetWorkSeconds) {
+                        currentPhase = "WORK";
+                        timerSeconds = targetWorkSeconds;
+                        initialDuration = targetWorkSeconds;
+                        spokenHalfway = false;
+                    }
                     lastSpokenSecond = -1;
                     startLocalTimer();
                 } else if (sheetStatus === "STOP" && timerStatus === "START") {
@@ -190,6 +199,7 @@
             timerInterval = setInterval(() => {
                 if (timerSeconds <= 0) {
                     if (currentPhase === "WORK" && targetBreakSeconds > 0) {
+                        // מעבר למנוחה
                         currentPhase = "BREAK";
                         timerSeconds = targetBreakSeconds;
                         initialDuration = targetBreakSeconds;
@@ -198,12 +208,26 @@
                         speak("Break time");
                         updateTimerDisplay();
                     } else {
-                        clearInterval(timerInterval);
-                        timerInterval = null;
-                        timerStatus = "STOP";
-                        currentPhase = "WORK";
-                        speak("Time is up");
-                        updateTimerDisplay();
+                        // בדיקה אם לעבור לסבב הבא בלופ (עד 6 סבבים)
+                        if (currentRound < TOTAL_ROUNDS) {
+                            currentRound++;
+                            currentPhase = "WORK";
+                            timerSeconds = targetWorkSeconds;
+                            initialDuration = targetWorkSeconds;
+                            spokenHalfway = false;
+                            lastSpokenSecond = -1;
+                            speak("Next round");
+                            updateTimerDisplay();
+                        } else {
+                            // סיום כל 6 הסבבים
+                            clearInterval(timerInterval);
+                            timerInterval = null;
+                            timerStatus = "STOP";
+                            currentPhase = "WORK";
+                            currentRound = 1;
+                            speak("Workout complete. Well done");
+                            updateTimerDisplay();
+                        }
                     }
                     return;
                 }
@@ -212,7 +236,7 @@
                 updateTimerDisplay();
 
                 let halfTime = Math.floor(initialDuration / 2);
-                if (currentPhase === "WORK" && timerSeconds === halfTime && !spokenHalfway && initialDuration > 10) {
+                if (currentPhase === "WORK" && timerSeconds === halfTime && !spokenHalfway && initialDuration > 0) {
                     speak("Half way");
                     spokenHalfway = true;
                 }
@@ -226,11 +250,16 @@
 
         function updateTimerDisplay() {
             const timerEl = document.getElementById('workout-timer');
+            const roundEl = document.getElementById('round-counter');
+            
             let mins = Math.floor(timerSeconds / 60);
             let secs = timerSeconds % 60;
             
-            let prefix = currentPhase === "BREAK" ? "הפסקה: " : "";
+            let prefix = currentPhase === "BREAK" ? "מנוחה: " : "";
             timerEl.innerText = `${prefix}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+            // עדכון הכיתוב מעל הטיימר: סבב X מתוך 6
+            roundEl.innerText = `סבב ${currentRound} מתוך ${TOTAL_ROUNDS}`;
 
             if (timerStatus === "START") {
                 if (currentPhase === "BREAK") {
@@ -280,18 +309,16 @@
                     active = s;
                 }
             }
+
             render(active);
         }
 
         function render(active) {
             const container = document.getElementById('container');
-            const info = document.getElementById('training-info');
             if (!active) {
                 container.innerHTML = '<div style="text-align:center;margin-top:20%;font-size:24px;color:#555;">אין אימון פעיל כרגע</div>';
-                info.innerText = "סטודיו אלמה";
                 return;
             }
-            info.innerText = active.title;
             container.innerHTML = '';
             
             const trainees = active.trainees.filter(t => t[0]);
@@ -344,7 +371,6 @@
         }, 1000);
 
         loadData();
-        // קצב רענון מהיר של 2.5 שניות לעדכון מיידי מהלחצנים
         setInterval(loadData, 2500);
     </script>
 </body>
