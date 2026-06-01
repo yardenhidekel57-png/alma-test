@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>STUDIO ALMA - FIXED SYSTEM</title>
+    <title>STUDIO ALMA - LIVE SYSTEM</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; line-height: 1.1; }
         html, body { height: 100%; width: 100%; overflow: hidden; background-color: #000; color: white; font-family: Arial, sans-serif; }
@@ -41,7 +41,7 @@
     <div class="header">
         <div id="time">00:00:00</div>
         <div class="header-center">
-            <div id="training-info">טוען...</div>
+            <div id="training-info">טוען נתונים...</div>
             <div id="workout-timer">--:--</div>
         </div>
         <div class="logo-main">STUDIO ALMA</div>
@@ -50,9 +50,12 @@
     <div class="footer-credit">Developed by Gal E</div>
 
     <script>
-        // קישורי ה-Publish הרשמיים שלך
-        const MAIN_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTggXVWik8QaoDDmwiG2f8j10AChK6CorKyVSzciYilwcGdOIEg1cvK19ncB65S3RZpCIvJwORgxXna/pub?gid=0&single=true&output=csv`;
-        const TIMER_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTggXVWik8QaoDDmwiG2f8j10AChK6CorKyVSzciYilwcGdOIEg1cvK19ncB65S3RZpCIvJwORgxXna/pub?gid=573894189&single=true&output=csv`;
+        // מזהה הגיליון הרשמי שלך
+        const SHEET_ID = '1IwRekT67DtOfhCy3iN9ogGXNWd2DZWT5rhbsmkz_1NY';
+        
+        // שימוש בפורמט export הפתוח למניעת חסימות CORS של דפדפנים
+        const MAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=573894189`;
 
         let timerSeconds = 0;
         let initialDuration = 0;
@@ -71,7 +74,7 @@
             }
         }
 
-        // פונקציית עזר חסינה לפירוק שורות CSV המונעת קריסות קוד
+        // פונקציית פירוק חסינה המנקה גרשיים ורווחים מיותרים מכל תא
         function parseCSV(text) {
             let lines = text.split(/\r?\n/);
             return lines.map(line => {
@@ -83,13 +86,13 @@
                     if (char === '"') {
                         inQuotes = !inQuotes;
                     } else if (char === ',' && !inQuotes) {
-                        cells.push(current.trim());
+                        cells.push(current.trim().replace(/^"|"$/g, ''));
                         current = '';
                     } else {
                         current += char;
                     }
                 }
-                cells.push(current.trim());
+                cells.push(current.trim().replace(/^"|"$/g, ''));
                 return cells;
             });
         }
@@ -98,24 +101,24 @@
             try {
                 const timestamp = '&t=' + Date.now();
                 
-                // 1. טעינת טיימר
+                // 1. קריאת נתוני טיימר
                 const resTimer = await fetch(TIMER_URL + timestamp);
                 const textTimer = await resTimer.text();
-                if (textTimer && textTimer.length > 0) {
+                if (textTimer && textTimer.trim().length > 0) {
                     const rowsTimer = parseCSV(textTimer);
                     parseTimerSettings(rowsTimer);
                 }
 
-                // 2. טעינת מתאמנות
+                // 2. קריאת נתוני מתאמנות
                 const resMain = await fetch(MAIN_URL + timestamp);
                 const textMain = await resMain.text();
-                if (textMain && textMain.length > 0) {
+                if (textMain && textMain.trim().length > 0) {
                     const rowsMain = parseCSV(textMain);
                     parse(rowsMain);
                 }
 
             } catch (e) { 
-                console.error("Error loading data: ", e); 
+                console.error("שגיאה במשיכת הנתונים מגוגל שיט: ", e); 
             }
         }
 
@@ -125,15 +128,15 @@
 
             for (let i = 0; i < rows.length; i++) {
                 for (let j = 0; j < rows[i].length; j++) {
-                    let cell = rows[i][j] ? rows[i][j].replace(/^"|"$/g, '').trim() : "";
+                    let cell = rows[i][j] ? rows[i][j].trim() : "";
                     
                     if (cell === "זמן טיימר בדקות") {
-                        let nextCell = rows[i][j+1] ? rows[i][j+1].replace(/^"|"$/g, '').trim() : "";
+                        let nextCell = rows[i][j+1] ? rows[i][j+1].trim() : "";
                         let val = parseFloat(nextCell);
                         if (!isNaN(val)) targetDurationInSeconds = Math.round(val * 60);
                     }
                     if (cell === "סטטוס טיימר") {
-                        let nextCell = rows[i][j+1] ? rows[i][j+1].replace(/^"|"$/g, '').trim() : "STOP";
+                        let nextCell = rows[i][j+1] ? rows[i][j+1].trim() : "STOP";
                         let val = nextCell.toUpperCase();
                         if (val === "START" || val === "STOP" || val === "RESET") targetStatus = val;
                     }
@@ -220,7 +223,7 @@
 
             rows.forEach(row => {
                 if (!row || row.length === 0) return;
-                let firstCell = row[0] ? row[0].replace(/^"|"$/g, '').trim() : "";
+                let firstCell = row[0] ? row[0].trim() : "";
                 
                 if (firstCell.includes("אימון")) {
                     const m = firstCell.match(/(\d{1,2}):(\d{2})/);
@@ -250,4 +253,69 @@
         }
 
         function render(active) {
-            const container =
+            const container = document.getElementById('container');
+            const info = document.getElementById('training-info');
+            if (!active) {
+                container.innerHTML = '<div style="text-align:center;margin-top:20%;font-size:24px;color:#555;">אין אימון פעיל כרגע</div>';
+                info.innerText = "סטודיו אלמה";
+                return;
+            }
+            info.innerText = active.title;
+            container.innerHTML = '';
+            
+            const trainees = active.trainees.filter(t => t[0]);
+            const max = trainees.length <= 3 ? trainees.length : Math.ceil(trainees.length / 2);
+            let rowDiv = document.createElement('div');
+            rowDiv.className = 'row';
+
+            trainees.forEach((t, i) => {
+                if (i > 0 && i % max === 0) {
+                    container.appendChild(rowDiv);
+                    rowDiv = document.createElement('div');
+                    rowDiv.className = 'row';
+                }
+                
+                let exs = "";
+                for (let m = 1; m < t.length; m++) {
+                    let val = t[m] ? t[m].trim() : "";
+                    if (val === "" || val === "..." || val === "null") continue;
+
+                    if (val.length > 4 || (!val.includes('.') && !val.includes(',') && !val.toLowerCase().includes('k'))) {
+                        let name = val;
+                        let weight = "";
+                        let reps = "";
+
+                        for(let k=1; k<=2; k++) {
+                            let next = t[m+k] ? t[m+k].trim().toLowerCase() : "";
+                            if (next.includes('k') || (next.match(/^\d+$/) && next.length <= 3)) {
+                                weight = t[m+k].trim();
+                            } else if (next.includes('.') || next.includes(',') || (next.match(/^\d+$/) && next.length > 0)) {
+                                reps = t[m+k].trim();
+                            }
+                        }
+
+                        reps = reps.replace(/,/g, 'x').replace(/\./g, 'x');
+                        exs += `<div class="ex-row"><div class="ex-text"><span>${name}</span>${weight ? `<span class="weight">${weight}</span>` : ''}</div><div class="reps">${reps || '--'}</div></div>`;
+                        m += 2;
+                    }
+                }
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `<div class="name">${t[0]}</div><div class="ex-list">${exs}</div>`;
+                rowDiv.appendChild(card);
+            });
+            container.appendChild(rowDiv);
+        }
+
+        // השעון המרכזי מופעל עצמאית לחלוטין - לא יתקע לעולם
+        setInterval(() => {
+            const d = new Date();
+            document.getElementById('time').innerText = d.toTimeString().split(' ')[0];
+        }, 1000);
+
+        // טעינת נתונים ומערכת רענון קבועה
+        loadData();
+        setInterval(loadData, 2500);
+    </script>
+</body>
+</html>
