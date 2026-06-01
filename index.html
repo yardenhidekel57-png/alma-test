@@ -53,7 +53,8 @@
     <script>
         const SHEET_ID = '1IwRekT67DtOfhCy3iN9ogGXNWd2DZWT5rhbsmkz_1NY';
         const MAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
-        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=573894189`;
+        // פנייה ישירה לטאב נתוני טיימר הנקי (ללא כפתורים גרפיים) כדי למנוע שגיאות ייצוא של גוגל
+        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=1478781763`;
 
         let timerSeconds = 0;
         let initialDuration = 0;
@@ -106,7 +107,7 @@
             try {
                 const timestamp = '&t=' + Date.now();
                 
-                // 1. משיכת נתוני הטיימר מהטאב הייעודי
+                // 1. משיכת נתוני הטיימר מהטאב הנקי החדש
                 const resTimer = await fetch(TIMER_URL + timestamp);
                 const textTimer = await resTimer.text();
                 if (textTimer && textTimer.trim().length > 0) {
@@ -114,7 +115,7 @@
                     parseTimerSettings(rowsTimer);
                 }
 
-                // 2. משיכת נתוני המתאמנות
+                // 2. משיכת נתוני המתאמנות מהטאב הראשי
                 const resMain = await fetch(MAIN_URL + timestamp);
                 const textMain = await resMain.text();
                 if (textMain && textMain.trim().length > 0) {
@@ -144,6 +145,12 @@
                 if (label === "מצב נוכחי") {
                     sheetStatus = value.toUpperCase();
                 }
+            }
+
+            // עדכון וסנכרון זמני ברירת המחדל כשהטיימר במצב עצור
+            if (timerStatus === "STOP" && currentPhase === "WORK" && timerSeconds !== targetWorkSeconds) {
+                timerSeconds = targetWorkSeconds;
+                updateTimerDisplay();
             }
 
             // הפעלת לוגיקה רק במידה והתגלה שינוי במצב בגיליון
@@ -284,3 +291,61 @@
                 info.innerText = "סטודיו אלמה";
                 return;
             }
+            info.innerText = active.title;
+            container.innerHTML = '';
+            
+            const trainees = active.trainees.filter(t => t[0]);
+            const max = trainees.length <= 3 ? trainees.length : Math.ceil(trainees.length / 2);
+            let rowDiv = document.createElement('div');
+            rowDiv.className = 'row';
+
+            trainees.forEach((t, i) => {
+                if (i > 0 && i % max === 0) {
+                    container.appendChild(rowDiv);
+                    rowDiv = document.createElement('div');
+                    rowDiv.className = 'row';
+                }
+                
+                let exs = "";
+                for (let m = 1; m < t.length; m++) {
+                    let val = t[m] ? t[m].trim() : "";
+                    if (val === "" || val === "..." || val === "null") continue;
+
+                    if (val.length > 4 || (!val.includes('.') && !val.includes(',') && !val.toLowerCase().includes('k'))) {
+                        let name = val;
+                        let weight = "";
+                        let reps = "";
+
+                        for(let k=1; k<=2; k++) {
+                            let next = t[m+k] ? t[m+k].trim().toLowerCase() : "";
+                            if (next.includes('k') || (next.match(/^\d+$/) && next.length <= 3)) {
+                                weight = t[m+k].trim();
+                            } else if (next.includes('.') || next.includes(',') || (next.match(/^\d+$/) && next.length > 0)) {
+                                reps = t[m+k].trim();
+                            }
+                        }
+
+                        reps = reps.replace(/,/g, 'x').replace(/\./g, 'x');
+                        exs += `<div class="ex-row"><div class="ex-text"><span>${name}</span>${weight ? `<span class="weight">${weight}</span>` : ''}</div><div class="reps">${reps || '--'}</div></div>`;
+                        m += 2;
+                    }
+                }
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `<div class="name">${t[0]}</div><div class="ex-list">${exs}</div>`;
+                rowDiv.appendChild(card);
+            });
+            container.appendChild(rowDiv);
+        }
+
+        setInterval(() => {
+            const d = new Date();
+            document.getElementById('time').innerText = d.toTimeString().split(' ')[0];
+        }, 1000);
+
+        loadData();
+        // קצב רענון מהיר של 2.5 שניות לעדכון מיידי מהלחצנים
+        setInterval(loadData, 2500);
+    </script>
+</body>
+</html>
