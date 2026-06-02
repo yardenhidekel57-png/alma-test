@@ -20,7 +20,7 @@
         #workout-timer.halfway { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 103, 0.1); }
         #workout-timer.break { color: #ff9f43; border-color: #ff9f43; background: rgba(255, 159, 67, 0.15); animation: blink 1.5s infinite alternate; }
         
-        #container { flex-grow: 1; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+        #container { flex-grow: 1; display: flex; flex-direction: column; gap: 4px; overflow: hidden; position: relative; }
         .row { display: flex; flex: 1; gap: 4px; justify-content: center; align-items: stretch; max-height: 48%; }
         .card { background: #111; border: 1.5px solid #333; border-radius: 10px; display: flex; flex-direction: column; flex: 1; padding: 6px; overflow: hidden; }
         .name { font-size: 20px; color: #ff6600; text-align: center; border-bottom: 2px solid #444; margin-bottom: 3px; font-weight: 900; padding-bottom: 2px; }
@@ -36,6 +36,10 @@
         .weight { color: #ff9f43; font-weight: 900; margin-right: 6px; font-size: 13px; background: rgba(255,159,67,0.1); padding: 0 3px; border-radius: 3px; }
         .footer-credit { height: 18px; font-size: 11px; color: #444; text-align: left; padding: 0 10px; font-family: Arial; }
         
+        #audio-auth-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.98); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+        .auth-btn { background: #ff6600; color: white; border: none; padding: 22px 45px; font-size: 26px; font-weight: bold; border-radius: 12px; cursor: pointer; box-shadow: 0 0 25px rgba(255,102,0,0.6); font-family: Arial, sans-serif; }
+        .auth-btn:active { background: #e05500; }
+
         @keyframes blink { from { opacity: 1; } to { opacity: 0.85; } }
     </style>
 </head>
@@ -48,13 +52,22 @@
         </div>
         <div class="logo-main">STUDIO ALMA</div>
     </div>
-    <div id="container"></div>
+    
+    <div id="container">
+        <div id="audio-auth-overlay">
+            <button class="auth-btn" onclick="activateAudioSystem()">לחץ כאן להפעלת סאונד ומערכת</button>
+        </div>
+    </div>
+    
     <div class="footer-credit">Developed by Gal E</div>
 
     <script>
-        const SHEET_ID = '1IwRekT67DtOfhCy3iN9ogGXNWd2DZWT5rhbsmkz_1NY';
+        const SHEET_ID = '18DFppHukNFORCDMr4CAyZ-LlEOgBKVDbliLN4-vpFCk';
         const MAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
-        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=1478781763`;
+        const TIMER_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=688968739`;
+
+        // שימוש במחולל צלילים דיגיטלי פנימי (Web Audio API) כדי לייצר דיבור/צלילים מדויקים ישירות מחומרת המסך ללא תלות בקבצים חיצוניים
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         let timerSeconds = 0;
         let initialDuration = 0;
@@ -65,21 +78,76 @@
         let targetBreakSeconds = 0;
 
         let timerInterval = null;
-        let spokenHalfway = false;
         let lastSpokenSecond = -1;
         
         let lastSheetStatus = "STOP";
 
         const TOTAL_ROUNDS = 6; 
         let currentRound = 1;
+        let isAudioUnlocked = false;
 
-        function speak(text) {
+        function activateAudioSystem() {
+            isAudioUnlocked = true;
+            document.getElementById('audio-auth-overlay').style.display = 'none';
+            
+            // הפעלת ערוץ האודיו הפנימי של הטלוויזיה
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            
+            // השמעת צליל פתיחה קצר לאישור מערכת
+            playTone(440, 0.1);
+            
+            loadData();
+            setInterval(loadData, 2500);
+        }
+
+        // פונקציה לייצור צלילי חיווי בתדרים שונים שמדמים את הודעות המערכת בצורה מושלמת בטלוויזיה
+        function playTone(freq, duration) {
+            if (!isAudioUnlocked) return;
+            try {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) { console.error(e); }
+        }
+
+        // פונקציית הדיבור שמספקת את חוויית המלל - במידה והדפדפן תומך היא תדבר, ובמידה ולא (בטלוויזיה) היא תשתמש בצליל ייחודי מותאם כדי שהאימון לא ייעצר
+        function speakFallback(text, type) {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text);
+                let utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'en-US';
-                utterance.rate = 1.15;
+                utterance.rate = 1.2;
                 window.speechSynthesis.speak(utterance);
+                
+                // בדיקת גיבוי למקרה ש-TVBro חוסם או לא משמיע את המלל
+                setTimeout(() => {
+                    if (!window.speechSynthesis.speaking) {
+                        triggerToneFallback(type);
+                    }
+                }, 150);
+            } else {
+                triggerToneFallback(type);
+            }
+        }
+
+        function triggerToneFallback(type) {
+            if (type === 'break') {
+                playTone(523.25, 0.5); // צליל מלודי למנוחה
+            } else if (type === 'next') {
+                playTone(587.33, 0.5); // צליל מלודי לסיבוב הבא
+            } else if (type === 'complete') {
+                playTone(880, 0.8); // צליל ניצחון לסיום
+            } else {
+                playTone(659.25, 0.15); // צליל ספירה קצר לשניות
             }
         }
 
@@ -106,10 +174,10 @@
         }
 
         async function loadData() {
+            if (!isAudioUnlocked) return;
             try {
                 const timestamp = '&t=' + Date.now();
                 
-                // 1. משיכת נתוני הטיימר
                 const resTimer = await fetch(TIMER_URL + timestamp);
                 const textTimer = await resTimer.text();
                 if (textTimer && textTimer.trim().length > 0) {
@@ -117,7 +185,6 @@
                     parseTimerSettings(rowsTimer);
                 }
 
-                // 2. משיכת נתוני המתאמנות
                 const resMain = await fetch(MAIN_URL + timestamp);
                 const textMain = await resMain.text();
                 if (textMain && textMain.trim().length > 0) {
@@ -165,7 +232,6 @@
                     currentRound = 1;
                     timerSeconds = targetWorkSeconds;
                     initialDuration = targetWorkSeconds;
-                    spokenHalfway = false;
                     lastSpokenSecond = -1;
                     updateTimerDisplay();
                 } else if (sheetStatus === "START" && timerStatus !== "START") {
@@ -174,7 +240,6 @@
                         currentPhase = "WORK";
                         timerSeconds = targetWorkSeconds;
                         initialDuration = targetWorkSeconds;
-                        spokenHalfway = false;
                     }
                     lastSpokenSecond = -1;
                     startLocalTimer();
@@ -198,9 +263,8 @@
                         currentPhase = "BREAK";
                         timerSeconds = targetBreakSeconds;
                         initialDuration = targetBreakSeconds;
-                        spokenHalfway = false;
                         lastSpokenSecond = -1;
-                        speak("Break time");
+                        speakFallback("Break time", "break"); 
                         updateTimerDisplay();
                     } else {
                         if (currentRound < TOTAL_ROUNDS) {
@@ -208,9 +272,8 @@
                             currentPhase = "WORK";
                             timerSeconds = targetWorkSeconds;
                             initialDuration = targetWorkSeconds;
-                            spokenHalfway = false;
                             lastSpokenSecond = -1;
-                            speak("Next round");
+                            speakFallback("Next round", "next"); 
                             updateTimerDisplay();
                         } else {
                             clearInterval(timerInterval);
@@ -218,7 +281,7 @@
                             timerStatus = "STOP";
                             currentPhase = "WORK";
                             currentRound = 1;
-                            speak("Workout complete. Well done");
+                            speakFallback("Workout complete. Well done", "complete"); 
                             updateTimerDisplay();
                         }
                     }
@@ -228,14 +291,9 @@
                 timerSeconds--;
                 updateTimerDisplay();
 
-                let halfTime = Math.floor(initialDuration / 2);
-                if (currentPhase === "WORK" && timerSeconds === halfTime && !spokenHalfway && initialDuration > 0) {
-                    speak("Half way");
-                    spokenHalfway = true;
-                }
-
+                // ספירה לאחור אנושית
                 if (timerSeconds <= 5 && timerSeconds > 0 && lastSpokenSecond !== timerSeconds) {
-                    speak(timerSeconds.toString());
+                    speakFallback(timerSeconds.toString(), "count");
                     lastSpokenSecond = timerSeconds;
                 }
             }, 1000);
@@ -295,7 +353,6 @@
             for (let i = 0; i < sessions.length; i++) {
                 let s = sessions[i];
                 let nextS = sessions[i+1];
-                // שינוי לוגי: מציג את האימון בדיוק החל משעת ההתחלה שלו ועד שהוא מסתיים (או עד האימון הבא)
                 if (nowMin >= s.start && (!nextS || nowMin < nextS.start)) {
                     if (nowMin < s.start + 65) active = s;
                 }
@@ -360,9 +417,6 @@
             const d = new Date();
             document.getElementById('time').innerText = d.toTimeString().split(' ')[0];
         }, 1000);
-
-        loadData();
-        setInterval(loadData, 2500);
     </script>
 </body>
 </html>
